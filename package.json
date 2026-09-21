@@ -1,8 +1,7 @@
 {
   "name": "dsh-api-ledger",
-  "version": "0.2.1",
-  "private": true,
-  "description": "DSH 插件：按 API 凭据统计 token 与费用，不同额度池分列不合并。Per-credential token and cost ledger for DeepSeek Harness.",
+  "version": "0.2.2",
+  "description": "API token usage and estimated cost reports for DeepSeek Harness, with per-route pricing, session totals and CNY/USD display.",
   "type": "module",
   "license": "MIT",
   "main": "lib/index.js",
@@ -17,7 +16,11 @@
   "files": [
     "lib",
     "cordis.patch.yml",
-    "README.md"
+    "scripts/install.mjs",
+    "README.md",
+    "README.zh.md",
+    "LICENSE",
+    "assets"
   ],
   "scripts": {
     "check": "node --check lib/index.js && node --check lib/pricing.js && node --check lib/identities.js && node --check lib/records.js && node --check lib/client.js && node --check lib/config.js && node --check scripts/install.mjs",
@@ -36,5 +39,25 @@
         "@deepseek-ai/dsh-client-ui-sidebar"
       ]
     }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LAwLi3tCoding/dsh-api-ledger.git"
+  },
+  "homepage": "https://github.com/LAwLi3tCoding/dsh-api-ledger#readme",
+  "bugs": {
+    "url": "https://github.com/LAwLi3tCoding/dsh-api-ledger/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "api",
+    "usage",
+    "cost",
+    "tokens"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
   }
 }
