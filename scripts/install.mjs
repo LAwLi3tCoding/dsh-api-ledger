@@ -19,7 +19,7 @@
  *   node scripts/install.mjs --uninstall
  */
 
-import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -67,7 +67,7 @@ if (!existsSync(manifestPath)) {
   console.error(`Known profiles:`)
   const profilesDir = join(dshHome, 'profiles')
   if (existsSync(profilesDir)) {
-    for (const entry of readFileSync(profilesDir, 'utf8') === undefined ? [] : []) void entry
+    // The following message gives the profile directory to inspect.
   }
   console.error(`  (list ${join(dshHome, 'profiles')} to see them)`)
   process.exit(1)
@@ -145,7 +145,7 @@ if (!manifest.dsh.profile.bundles.includes(pkg.name)) {
 const relativeTarget = relative(join(profileDir, 'node_modules'), packageRoot)
 
 let linkChanged = false
-const currentTarget = isSymlink(linkPath) ? readFileSync(linkPath, 'utf8') : null
+const currentTarget = isSymlink(linkPath) ? readlinkSync(linkPath) : null
 if (currentTarget !== null && resolve(join(profileDir, 'node_modules'), currentTarget) === packageRoot) {
   // Already points at this checkout.
 } else {

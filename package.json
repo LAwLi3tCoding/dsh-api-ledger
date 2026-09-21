@@ -1,6 +1,6 @@
 {
   "name": "dsh-api-ledger",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "DSH 插件：按 API 凭据统计 token 与费用，不同额度池分列不合并。Per-credential token and cost ledger for DeepSeek Harness.",
   "type": "module",
@@ -20,8 +20,8 @@
     "README.md"
   ],
   "scripts": {
-    "check": "node --check lib/index.js && node --check lib/pricing.js && node --check lib/identities.js && node --check lib/records.js && node --check lib/client.js",
-    "test": "node tests/pricing.test.js && node tests/identities.test.js && node tests/records.test.js && node tests/i18n.test.js && node tests/report.test.js && node tests/client-wiring.test.js && node tests/client-behavior.test.js"
+    "check": "node --check lib/index.js && node --check lib/pricing.js && node --check lib/identities.js && node --check lib/records.js && node --check lib/client.js && node --check lib/config.js && node --check scripts/install.mjs",
+    "test": "node tests/pricing.test.js && node tests/identities.test.js && node tests/records.test.js && node tests/i18n.test.js && node tests/report.test.js && node tests/client-wiring.test.js && node tests/client-behavior.test.js && node tests/config.test.js"
   },
   "dsh": {
     "bundle": {

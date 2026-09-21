@@ -130,12 +130,12 @@ test('a malformed directory entry is skipped, not fatal', async () => {
   assert.ok('good' in dir)
 })
 
-test('identityOf prefers the reference, then the route, then unknown', () => {
+test('identityOf keeps routes separate even with a shared reference', () => {
   const identities = {
     a: { provider: 'a', label: 'A label', keyRef: 'REF_A' },
     b: { provider: 'b', label: 'B label', keyRef: null },
   }
-  assert.deepEqual(identityOf('a', identities), { id: 'REF_A', label: 'REF_A', keyRef: 'REF_A' })
+  assert.deepEqual(identityOf('a', identities), { id: 'a', label: 'A label', keyRef: 'REF_A' })
   // Without a reference the route name still separates two keys.
   assert.deepEqual(identityOf('b', identities), { id: 'b', label: 'B label', keyRef: null })
   assert.deepEqual(identityOf('never-seen', identities), { id: 'never-seen', label: 'never-seen', keyRef: null })

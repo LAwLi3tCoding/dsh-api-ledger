@@ -85,7 +85,7 @@ function record(overrides) {
  * names. Anything the plugin needs beyond that is a bug in its own fail-soft
  * contract, and this mount would fail loudly.
  */
-async function mount(home, records) {
+async function mount(home, records, services = {}) {
   mkdirSync(join(home, 'api-ledger'), { recursive: true })
   const lines = records.map((row) => JSON.stringify(row)).join('\n')
   writeFileSync(join(home, 'api-ledger', 'records.jsonl'), `${lines}\n`)
@@ -95,7 +95,7 @@ async function mount(home, records) {
   // reads the environment inside `apply`, so ordering only matters for clarity.
   const host = await import('../lib/index.js')
 
-  const captured = { rpc: null, http: null }
+  const captured = { rpc: null, http: null, preferences: null, stream: null }
   function child() {
     return {
       connection: {
@@ -108,7 +108,8 @@ async function mount(home, records) {
       },
       webServer: {
         register(route) {
-          captured.http = route
+          if (route.path === '/api-ledger/report') captured.http = route
+          else captured.preferences = route
           return () => {}
         },
       },
@@ -120,8 +121,8 @@ async function mount(home, records) {
     }
   }
   const ctx = {
-    get: () => undefined,
-    on: () => () => {},
+    get: name => services[name],
+    on: (name, handler) => { if (name === 'llm/stream') captured.stream = handler; return () => {} },
     effect: (fn) => {
       const disposer = fn()
       return typeof disposer === 'function' ? disposer : () => {}
@@ -276,8 +277,8 @@ await test('the payload carries exactly the paths the client reads', async (dir)
 
 await test('dashboard periods and session filters keep separate pool charts and honest unpriced totals', async (dir) => {
   const captured = await mount(dir, [
-    record({ time: TODAY_START, usd: .14, pool: 'personal-deepseek' }),
-    record({ time: TODAY_START - 1, usd: 9, pool: 'personal-deepseek' }),
+    record({ time: TODAY_START, usd: .14, pool: 'personal-deepseek', route: 'personal' }),
+    record({ time: TODAY_START - 1, usd: 9, pool: 'personal-deepseek', route: 'personal' }),
     record({ time: TODAY_START + 1, usd: 2, pool: 'corporate', sessionId: 's2' }),
     record({ time: TODAY_START + 2, usd: 0, priced: false, pool: 'corporate' }),
   ])
@@ -287,9 +288,9 @@ await test('dashboard periods and session filters keep separate pool charts and 
   assert.equal(r.view.calls, 2)
   assert.equal(r.view.unpriced, 1)
   assert.equal(r.viewPools.length, 2)
-  assert.equal(r.viewPools.find(p => p.pool === 'personal-deepseek').totals.usd, .14)
-  assert.equal(r.viewPools.find(p => p.pool === 'corporate').totals.byPool[0].unpriced, 1)
-  assert.equal(r.viewPools.find(p => p.pool === 'corporate').totals.byModel[0].unpriced, 1)
+  assert.equal(r.viewPools.find(p => p.pool === 'route:personal').totals.usd, .14)
+  assert.equal(r.viewPools.find(p => p.pool === 'route:exampleGateway').totals.byPool[0].unpriced, 1)
+  assert.equal(r.viewPools.find(p => p.pool === 'route:exampleGateway').totals.byModel[0].unpriced, 1)
   const nextDay = await captured.rpc.handlers.report({ now: NOW + DAY, todayStart: TODAY_START + DAY, range: 'today' })
   assert.equal(nextDay.today.calls, 0)
   assert.equal(nextDay.view.calls, 0)
@@ -309,6 +310,92 @@ await test('yesterday uses client calendar boundaries and recent calls stay scop
   assert.equal(JSON.stringify(r.recent).includes('must-not-leak'), false)
   const unknown = await captured.rpc.handlers.report({ now: NOW, todayStart: TODAY_START })
   assert.equal(unknown.yesterday, null)
+})
+
+await test('regrouping and price edits change the projection without rewriting history', async (dir) => {
+  const rows = [record({ route: 'a', identity: 'SHARED', usd: 1 }), record({ route: 'b', identity: 'SHARED', usd: 2 })]
+  const captured = await mount(dir, rows)
+  const handler = captured.rpc.handlers
+  let r = await handler.report({ now: NOW, todayStart: TODAY_START })
+  assert.equal(r.view.byIdentity.length, 2)
+  assert.equal(r.viewPools.length, 2)
+  await handler.savePreference({ revision: r.settings.revision, route: 'a', label: 'Primary', group: 'Team', model: 'deepseek-v4-flash', mode: 'none' })
+  r = await handler.report({ now: NOW, todayStart: TODAY_START })
+  await handler.savePreference({ revision: r.settings.revision, route: 'b', label: 'Secondary', group: 'Team', model: 'deepseek-v4-flash', mode: 'custom', rates: { inputPerM: 99, outputPerM: 99, currency: 'CNY' } })
+  r = await handler.report({ now: NOW, todayStart: TODAY_START })
+  assert.equal(r.viewPools.length, 1)
+  assert.equal(r.poolLabels['group:Team'], 'Team')
+  assert.equal(r.view.usd, 3)
+  assert.equal(r.today.byPool[0].usd, 3)
+  assert.equal(r.recent[0].pool, 'group:Team')
+  assert.equal(r.view.byIdentity.find(row => row.id === 'a').label, 'Primary')
+  const disk = JSON.parse((await import('node:fs')).readFileSync(join(dir, 'api-ledger', 'records.jsonl'), 'utf8').split('\n')[0])
+  assert.equal(disk.identity, 'SHARED')
+  assert.equal(disk.usd, 1)
+})
+
+await test('HTTP preference writes require same origin, JSON and a current process token', async (dir) => {
+  const captured = await mount(dir, [record({ route: 'proxy' })])
+  const data = await captured.rpc.handlers.report()
+  async function request(headers, args) {
+    let result, status
+    const req = { method: 'POST', headers, on(event, cb) { if (event === 'data') cb(JSON.stringify(args)); if (event === 'end') cb(); return req } }
+    await captured.preferences.handler(req, { writeHead(s) { status = s }, end(body) { result = JSON.parse(body) } })
+    return { result, status }
+  }
+  const headers = { origin: 'http://localhost:4000', host: 'localhost:4000', 'content-type': 'application/json' }
+  const args = { token: data.settings.token, revision: data.settings.revision, route: 'proxy', label: 'API', group: '', model: 'deepseek-flash', mode: 'none' }
+  assert.equal((await request({ ...headers, origin: 'https://untrusted.example' }, args)).status, 403)
+  assert.equal((await request(headers, { ...args, token: 'invalid' })).status, 403)
+  assert.equal((await request({ ...headers, 'content-type': 'text/plain' }, args)).status, 403)
+  assert.equal((await request(headers, args)).status, 200)
+  assert.equal((await request(headers, args)).status, 400)
+})
+
+await test('actual accounting stream honors usage-only, custom and reference modes for future calls', async (dir) => {
+  const captured = await mount(dir, [])
+  async function call() {
+    const generator = captured.stream({ provider: 'proxy', model: 'deepseek-flash', sessionId: 's1' }, () => (async function* () { yield { type: 'usage', usage: { inputTokens: 1000000 } } })())
+    for await (const ignored of generator) void ignored
+  }
+  await call()
+  let r = await captured.rpc.handlers.report()
+  assert.equal(r.totals.unpriced, 1)
+  await captured.rpc.handlers.savePreference({ revision: r.settings.revision, route: 'proxy', label: 'API', group: '', model: 'deepseek-flash', mode: 'custom', rates: { inputPerM: 2, outputPerM: 3, currency: 'USD' } })
+  await call()
+  r = await captured.rpc.handlers.report()
+  assert.equal(r.totals.usd, 2)
+  assert.equal(r.totals.unpriced, 1)
+  await captured.rpc.handlers.savePreference({ revision: r.settings.revision, route: 'proxy', label: 'API', group: '', model: 'deepseek-flash', mode: 'reference' })
+  await call()
+  r = await captured.rpc.handlers.report()
+  assert.ok(Math.abs(r.totals.usd - 2.15) < 1e-9)
+  assert.equal(r.recent.filter(row => row.priceSource === 'reference').length, 1)
+  assert.equal(r.totals.calls, 3)
+})
+
+await test('route discovery hides unconfigured built-ins but keeps configured providers without calls', async (dir) => {
+  const captured = await mount(dir, [], { llm: { listConfigurableProviders: () => [
+    { provider: 'unused', settingsNs: 'providers', settingsPath: ['unused'] },
+    { provider: 'ready', settingsNs: 'providers', settingsPath: ['ready'], displayName: 'Ready' },
+  ] }, settings: { get: () => ({ ready: { models: [{ id: 'my-model' }] } }) } })
+  const r = await captured.rpc.handlers.report()
+  assert.deepEqual(r.settings.routes.map(row => row.route), ['ready'])
+  assert.deepEqual(r.settings.routes[0].models, ['my-model'])
+  assert.equal(r.viewPools.length, 0)
+})
+
+await test('inactive preference-only routes disappear after deletion while history remains', async (dir) => {
+  const captured = await mount(dir, [record({ route: 'historic' })])
+  writeFileSync(join(dir, 'api-ledger', 'config.json'), JSON.stringify({ labels: { stale: 'Unused' }, pools: { stale: 'Old' }, pricing: { 'stale/model': { mode: 'none' } } }))
+  let r = await captured.rpc.handlers.report()
+  assert.equal(r.settings.routes.find(row => row.route === 'stale').active, false)
+  assert.equal(r.settings.routes.find(row => row.route === 'stale').historical, false)
+  await captured.rpc.handlers.savePreference({ revision: r.settings.revision, route: 'stale', action: 'remove' })
+  r = await captured.rpc.handlers.report()
+  assert.deepEqual(r.settings.routes.map(row => row.route), ['historic'])
+  assert.equal(r.settings.routes[0].historical, true)
+  assert.equal(r.totals.calls, 1)
 })
 
 console.log(`report: ${passed} passed`)

@@ -60,7 +60,7 @@ const totals = { calls: 2, unpriced: 0, usd: 2.14, inputTokens: 100, outputToken
     { pool: 'corporate', calls: 1, usd: 2, unpriced: 0 },
   ] }
 const data = { ok: true, usdRates: { USD: 1, CNY: .14 }, poolLabels: { 'personal-deepseek': '官方额度', corporate: '公司额度' },
-  recent: [], yesterday: null, view: totals, totals, today: totals, session: { totals }, viewPools: totals.byPool.map(p => ({ pool: p.pool, totals: { ...totals, ...p, byPool: [p] } })) }
+  settings: { revision: "test", routes: [], pricing: {}, referenceModels: [] }, recent: [], yesterday: null, view: totals, totals, today: totals, session: { totals }, viewPools: totals.byPool.map(p => ({ pool: p.pool, totals: { ...totals, ...p, byPool: [p] } })) }
 const ready = { status: 'ready', data }
 
 await test('conversion preserves tiny spend, rejects missing FX, and keeps original USD data', () => {
@@ -153,7 +153,7 @@ await test('sidebar is one button, preserves multi-pool detail and opens the set
   const tree = b.show('sidebar.footer.action', ready, { wide: true })
   const buttons = b.nodes(tree).filter(n => n.type === 'button')
   assert.equal(buttons.length, 1, 'no nested currency button')
-  assert.match(b.text(tree), /\+1 池/)
+  assert.match(b.text(tree), /\+1 组/)
   assert.match(buttons[0].props.title, /公司额度 ¥14\.29/)
   buttons[0].props.onClick()
   assert.equal(opened, 1); assert.equal(selected, 1); assert.equal(focused, 1)

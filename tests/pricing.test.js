@@ -29,51 +29,25 @@ function test(label, fn) {
 
 console.log('pricing.js')
 
-test('a route-addressed rate wins over the model catalog', () => {
-  const hit = ratesFor('exampleGateway', 'deepseek-v4-flash')
-  assert.equal(hit.source, 'route')
-  assert.equal(hit.matchedKey, 'exampleGateway/deepseek-v4-flash')
-  // The corporate route and the personal route serve the same model id at
-  // different prices; the whole point is that they do not collapse.
-  const other = ratesFor('deepseek-official', 'deepseek-flash')
-  assert.notEqual(hit.rates.inputPerM, other.rates.inputPerM)
-})
-
-test('an aliased route still prices, and says it was an alias', () => {
-  const hit = ratesFor('gateway-backup', 'deepseek-v4-flash')
-  assert.equal(hit.source, 'alias')
-  assert.equal(hit.matchedKey, 'gateway/deepseek-v4-flash')
-})
-
-test('an unknown route is unpriced, NOT free', () => {
-  assert.equal(ratesFor('some-new-gateway', 'no-such-model'), null)
-})
-
-test('a known model on an unknown route falls back to the catalog, flagged', () => {
-  const hit = ratesFor('some-new-gateway', 'deepseek-v4-flash')
-  assert.equal(hit.source, 'catalog')
-  // The fallback pool is `unknown` so the report can surface it; silently
-  // reporting it as a real pool would corrupt that pool's total.
-  assert.equal(hit.rates.pool, 'unknown')
-  assert.equal(poolOf('some-new-gateway', hit.rates), 'unknown')
-})
-
-test('an explicit override beats the built-in table', () => {
-  const overrides = {
-    'exampleGateway/deepseek-v4-flash': { inputPerM: 0, outputPerM: 0, cacheReadPerM: 0, currency: 'CNY', pool: 'corporate' },
+test('all routes are unpriced by default, even known models and familiar names', () => {
+  for (const route of ['deepseek-official', 'gateway', 'exampleGateway', 'openai-codex']) {
+    assert.equal(ratesFor(route, 'deepseek-flash'), null)
+    assert.equal(poolOf(route, null), 'route:' + route)
   }
-  const hit = ratesFor('exampleGateway', 'deepseek-v4-flash', overrides)
-  assert.equal(hit.source, 'override')
-  assert.equal(hit.rates.inputPerM, 0)
 })
-
-test('a partial override is rejected, not merged', () => {
-  assert.equal(normalizeOverride({ inputPerM: 1 }), null)
-  assert.equal(normalizeOverride({ inputPerM: 1, outputPerM: 2, currency: 'JPY' }), null)
-  assert.equal(normalizeOverride(null), null)
-  // A rejected override must fall through to the table rather than pricing at zero.
-  const hit = ratesFor('exampleGateway', 'deepseek-v4-flash', { 'exampleGateway/deepseek-v4-flash': { inputPerM: 1 } })
-  assert.equal(hit.source, 'route')
+test('reference prices require explicit per-route model opt-in', () => {
+  const cfg = { 'proxy/deepseek-flash': { mode: 'reference' } }
+  assert.equal(ratesFor('proxy', 'deepseek-flash', cfg).source, 'reference')
+  assert.equal(ratesFor('other', 'deepseek-flash', cfg), null)
+  assert.equal(ratesFor('proxy', 'unknown', { 'proxy/unknown': { mode: 'reference' } }), null)
+})
+test('custom and usage-only pricing never silently fall back', () => {
+  const key = 'proxy/deepseek-flash'
+  assert.equal(ratesFor('proxy', 'deepseek-flash', { [key]: { mode: 'none' } }), null)
+  assert.equal(ratesFor('proxy', 'deepseek-flash', { [key]: { inputPerM: 1 } }), null)
+  const hit = ratesFor('proxy', 'deepseek-flash', { [key]: { inputPerM: 0, outputPerM: 0, currency: 'USD' } })
+  assert.equal(hit.source, 'custom')
+  assert.equal(hit.rates.inputPerM, 0)
 })
 
 test('a complete override with omitted cache fields defaults them to zero', () => {
@@ -111,16 +85,11 @@ test('missing and negative token counts are treated as zero', () => {
   assert.equal(priced.usd, 0)
 })
 
-test('the personal and corporate pools stay distinct', () => {
-  assert.equal(DEFAULT_POOLS['deepseek-official'], 'personal-deepseek')
-  assert.equal(DEFAULT_POOLS['exampleGateway'], 'corporate')
-  assert.equal(DEFAULT_POOLS['gateway-main'], 'corporate')
-  assert.notEqual(DEFAULT_POOLS['deepseek-official'], DEFAULT_POOLS['exampleGateway'])
-})
-
-test('a pool override map replaces the built-in classification', () => {
-  assert.equal(poolOf('exampleGateway', null, { exampleGateway: 'third-party' }), 'third-party')
-  assert.equal(poolOf('exampleGateway', { pool: 'corporate' }, { exampleGateway: 'third-party' }), 'third-party')
+test('groups are explicit, optional and cannot collide with route IDs', () => {
+  assert.deepEqual(DEFAULT_POOLS, {})
+  assert.equal(poolOf('proxy', null, { proxy: 'Work' }), 'group:Work')
+  assert.equal(poolOf('proxy', { pool: 'old-group' }, { proxy: '' }), 'route:proxy')
+  assert.equal(poolOf('Work', null), 'route:Work')
 })
 
 test('reporting basis is USD and every rate currency converts', () => {
