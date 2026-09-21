@@ -1,0 +1,13 @@
+# dsh-api-ledger bundle patch: one host row.
+#
+# The row name resolves from the profile's own node_modules, where
+# `dsh plugin --profile desktop add <path>` installed this package.
+#
+# Note the deliberate absence of any `config` block: every knob lives in the
+# ledger's own `config.json` under `$DSH_HOME/api-ledger/`, because price
+# overrides change while the machine is running and a settings write would
+# require a restart. Keeping them out of this row also means the profile's
+# patch layer never has to restate this row to change a price.
+- insert:
+    - id: api-ledger
+      name: 'dsh-api-ledger'
