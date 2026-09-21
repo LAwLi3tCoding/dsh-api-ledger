@@ -175,4 +175,18 @@ await test('recent calls, single-day composition and day comparisons render with
   assert.equal(b.nodes(tree).filter(n => n.type === 'svg').length, 0)
 })
 
+await test('official mode renders current tariff and historical currency warning', () => {
+  const b = boot()
+  const enriched = { ...data, suspectCurrencyCount: 2, settings: { ...data.settings,
+    routes: [{ route: 'direct', label: 'Direct', models: ['deepseek-flash'], official: true, active: true }],
+    referenceModels: ['deepseek-flash'], officialPrices: { 'deepseek-flash': { tariff: 'peak', rates: { inputPerM: .3, outputPerM: 1.2, cacheReadPerM: .006 } } } } }
+  const tree = b.show('settings.section', { status: 'ready', data: enriched })
+  assert.match(b.text(tree), /官方价表估算/)
+  assert.match(b.text(tree), /高峰/)
+  assert.match(b.text(tree), /0.3/)
+  assert.match(b.text(tree), /2 条记录疑似/)
+  const mode = b.nodes(tree).find(n => n.type === 'select' && n.props.value === 'official')
+  assert.ok(mode)
+})
+
 console.log(`client behavior: ${passed} passed`)

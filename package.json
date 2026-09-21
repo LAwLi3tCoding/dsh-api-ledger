@@ -1,6 +1,6 @@
 {
   "name": "dsh-api-ledger",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "DSH 插件：按 API 凭据统计 token 与费用，不同额度池分列不合并。Per-credential token and cost ledger for DeepSeek Harness.",
   "type": "module",

@@ -142,3 +142,15 @@ test('identityOf keeps routes separate even with a shared reference', () => {
 })
 
 console.log(`identities.js: ${passed} passed`)
+
+// Await directly: the older helper does not await async cases.
+{
+  const llm = fakeLlm([{ provider: 'direct', settingsNs: 'llm-deepseek' }])
+  for (const url of ['https://gateway.example', 'https://api.deepseek.com.evil.example', 'http://api.deepseek.com', 'https://api.deepseek.com/unknown']) {
+    const result = await resolveIdentities({ llm, settings: fakeSettings({}), environment: { get: () => ({ value: url }) } })
+    assert.equal(result.direct.official, false)
+  }
+  const result = await resolveIdentities({ llm, settings: fakeSettings({ 'llm-deepseek': { baseURL: 'https://api.deepseek.com/v1' } }), environment: { get: () => ({ value: 'https://gateway.example' }) } })
+  assert.equal(result.direct.official, true)
+  console.log('  ok  official endpoint recognition respects configuration and environment overrides')
+}

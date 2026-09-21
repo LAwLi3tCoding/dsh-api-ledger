@@ -398,4 +398,25 @@ await test('inactive preference-only routes disappear after deletion while histo
   assert.equal(r.totals.calls, 1)
 })
 
+await test('official capture uses verified endpoints, persists tariff, and rejects gateway opt-in', async dir => {
+  const captured = await mount(dir, [record({ base: { currency: 'CNY', inputPerM: .15, outputPerM: .6, cacheReadPerM: .003 } })], {
+    llm: { listConfigurableProviders: () => [{ provider: 'direct', settingsNs: 'llm-deepseek' }, { provider: 'proxy', settingsNs: 'other' }] },
+    settings: { get: ns => ({ baseURL: ns === 'llm-deepseek' ? 'https://api.deepseek.com' : 'https://gateway.example' }) },
+  })
+  const clock = Date.now
+  Date.now = () => Date.parse('2026-09-21T02:00:00Z')
+  try {
+    for await (const chunk of captured.stream({ provider: 'direct', model: 'deepseek-flash' }, () => (async function* () { yield { type: 'usage', usage: { inputTokens: 1000000, cacheReadTokens: 1000000, outputTokens: 1000000 } } })())) void chunk
+    const r = await captured.rpc.handlers.report()
+    assert.equal(r.recent[0].priceSource, 'official')
+    assert.equal(r.recent[0].tariff, 'peak')
+    assert.equal(r.recent[0].currency, 'USD')
+    assert.equal(r.recent[0].usd, 1.506)
+    assert.equal(r.suspectCurrencyCount, 1)
+    assert.ok(Math.abs(r.totals.usd - 2.506) < 1e-12)
+    await assert.rejects(() => captured.rpc.handlers.savePreference({ revision: r.settings.revision, route: 'proxy', label: '', group: '', model: 'deepseek-flash', mode: 'official' }), /no-official-price/)
+    await captured.rpc.handlers.savePreference({ revision: r.settings.revision, route: 'direct', label: '', group: '', model: 'deepseek-flash', mode: 'official' })
+  } finally { Date.now = clock }
+})
+
 console.log(`report: ${passed} passed`)
