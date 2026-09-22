@@ -50,7 +50,7 @@ node scripts/install.mjs
 # GitHub 安装
 dsh plugin --profile web add github:LAwLi3tCoding/dsh-api-ledger
 
-# npm 版本发布后可使用
+# npm 安装
 dsh plugin --profile web add dsh-api-ledger
 ```
 

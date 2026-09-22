@@ -58,7 +58,7 @@ Restart DSH Desktop. Open **Settings → API Ledger**, or the **API Ledger** tab
 # From GitHub
 dsh plugin --profile web add github:LAwLi3tCoding/dsh-api-ledger
 
-# From npm, after the release is available
+# From npm
 dsh plugin --profile web add dsh-api-ledger
 ```
 
@@ -149,7 +149,7 @@ node scripts/install.mjs
 # GitHub 安装
 dsh plugin --profile web add github:LAwLi3tCoding/dsh-api-ledger
 
-# npm 版本发布后可使用
+# npm 安装
 dsh plugin --profile web add dsh-api-ledger
 ```
 
