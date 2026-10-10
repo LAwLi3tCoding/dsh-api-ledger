@@ -125,9 +125,12 @@ Names and groups affect the current report presentation. Price edits affect futu
 npm run check
 npm test
 npm pack --dry-run
+npm run publish:check   # the release gate
 ```
 
 Tests exercise pricing boundaries, endpoint recognition, immutable historical amounts, configuration conflicts, same-origin writes, stream capture, report periods, bilingual UI and the four display slots. See [issues](https://github.com/LAwLi3tCoding/dsh-api-ledger/issues) for bug reports; share anonymized examples rather than API keys or private session logs.
+
+**Release gate.** `npm run publish:check` inspects the packed tarball — not the source tree — and refuses to publish on a dirty working tree, an uncommitted packed file, a credential shape or denied name inside the artifact, an unparsable or uninstallable build, an already-published version, or a failing test suite. `npm publish` runs it automatically via `prepublishOnly`, so it cannot be skipped. Names that must never ship live in a git-ignored `.publish-deny.txt` (one regex per line), which is what lets this script stay public.
 
 License: [MIT](LICENSE).
 
@@ -226,8 +229,11 @@ dsh plugin --profile web add dsh-api-ledger
 npm run check
 npm test
 npm pack --dry-run
+npm run publish:check   # 发布闸门
 ```
 
 测试覆盖计价边界、官方接口识别、历史金额不变、配置冲突、同源写入、流式捕获、报表周期、双语与四处展示。问题请提交到 [Issues](https://github.com/LAwLi3tCoding/dsh-api-ledger/issues)，使用匿名示例，不要上传 API Key 或私人会话日志。
+
+**发布闸门。** `npm run publish:check` 检查的是**打包产物**而不是源码树，出现以下任一情况就拒绝发布：工作区有未提交改动、包内文件未提交、产物里含凭据形态或禁止出现的名称、包内代码语法错误或装不起来、版本已存在于 registry、测试不通过。`npm publish` 通过 `prepublishOnly` 自动执行它，无法跳过。不该外发的名称放在 git-ignored 的 `.publish-deny.txt`（每行一个正则）里，这样这个脚本本身可以公开。
 
 许可证：[MIT](LICENSE)。

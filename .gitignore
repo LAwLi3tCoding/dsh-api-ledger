@@ -6,3 +6,6 @@ node_modules/
 coverage/
 records.jsonl
 rollup.json
+
+# Local publish gate deny list (never committed, see scripts/publish-check.mjs)
+.publish-deny.txt

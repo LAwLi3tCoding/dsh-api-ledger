@@ -23,8 +23,10 @@
     "assets"
   ],
   "scripts": {
-    "check": "node --check lib/index.js && node --check lib/pricing.js && node --check lib/identities.js && node --check lib/records.js && node --check lib/client.js && node --check lib/config.js && node --check scripts/install.mjs",
-    "test": "node tests/pricing.test.js && node tests/identities.test.js && node tests/records.test.js && node tests/i18n.test.js && node tests/report.test.js && node tests/client-wiring.test.js && node tests/client-behavior.test.js && node tests/config.test.js"
+    "check": "node --check lib/index.js && node --check lib/pricing.js && node --check lib/identities.js && node --check lib/records.js && node --check lib/client.js && node --check lib/config.js && node --check scripts/install.mjs && node --check scripts/publish-check.mjs",
+    "test": "node tests/pricing.test.js && node tests/identities.test.js && node tests/records.test.js && node tests/i18n.test.js && node tests/report.test.js && node tests/client-wiring.test.js && node tests/client-behavior.test.js && node tests/config.test.js",
+    "publish:check": "node scripts/publish-check.mjs",
+    "prepublishOnly": "node scripts/publish-check.mjs"
   },
   "dsh": {
     "bundle": {
