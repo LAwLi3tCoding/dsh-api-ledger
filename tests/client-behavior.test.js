@@ -175,18 +175,79 @@ await test('recent calls, single-day composition and day comparisons render with
   assert.equal(b.nodes(tree).filter(n => n.type === 'svg').length, 0)
 })
 
-await test('official mode renders current tariff and historical currency warning', () => {
+await test('an official route defaults to the built-in book and shows the current window', () => {
   const b = boot()
+  const book = { id: 'deepseek-public-2026', label: 'DeepSeek public price list', builtin: true, scheduled: true, currency: 'USD',
+    models: ['deepseek-flash'],
+    current: { 'deepseek-flash': { window: 'peak', multiplier: 2, rates: { inputPerM: .3, outputPerM: 1.2, cacheReadPerM: .006 } } } }
   const enriched = { ...data, suspectCurrencyCount: 2, settings: { ...data.settings,
     routes: [{ route: 'direct', label: 'Direct', models: ['deepseek-flash'], official: true, active: true }],
-    referenceModels: ['deepseek-flash'], officialPrices: { 'deepseek-flash': { tariff: 'peak', rates: { inputPerM: .3, outputPerM: 1.2, cacheReadPerM: .006 } } } } }
+    tariffs: [book] } }
   const tree = b.show('settings.section', { status: 'ready', data: enriched })
-  assert.match(b.text(tree), /官方价表估算/)
-  assert.match(b.text(tree), /高峰/)
-  assert.match(b.text(tree), /0.3/)
-  assert.match(b.text(tree), /2 条记录疑似/)
-  const mode = b.nodes(tree).find(n => n.type === 'select' && n.props.value === 'official')
-  assert.ok(mode)
+  const text = b.text(tree)
+  assert.match(text, /DeepSeek 公开价表/)
+  assert.match(text, /高峰/)
+  assert.match(text, /0.3/)
+  assert.match(text, /2 条记录疑似/)
+  // Endpoint recognition now picks a DEFAULT binding rather than granting a
+  // capability: the built-in book appears as an ordinary, selectable option.
+  assert.ok(b.nodes(tree).find(n => n.type === 'select' && n.props.value === 'tariff:deepseek-public-2026'))
+})
+
+await test('a gateway route binds the built-in book and shows peak against its own model', () => {
+  const b = boot()
+  const book = { id: 'deepseek-public-2026', label: 'DeepSeek public price list', builtin: true, scheduled: true, currency: 'USD',
+    models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+    current: {
+      'deepseek-v4-flash': { window: 'base', multiplier: 1, rates: { inputPerM: .15, outputPerM: .6, cacheReadPerM: .003 } },
+      'deepseek-v4-pro': { window: 'peak', multiplier: 2, rates: { inputPerM: 1.32, outputPerM: 3.96, cacheReadPerM: .044 } } } }
+  const enriched = { ...data, settings: { ...data.settings,
+    routes: [{ route: 'corporate-gateway', label: 'Gateway', group: 'Work', models: ['deepseek-v4-flash', 'deepseek-v4-pro'], official: false, active: true, hasPreferences: true }],
+    pricing: {
+      'corporate-gateway/deepseek-v4-pro': { mode: 'tariff', tariff: 'deepseek-public-2026', window: 'auto' },
+      'corporate-gateway/deepseek-v4-flash': { mode: 'custom', currency: 'CNY', inputPerM: 2, outputPerM: 8, cacheReadPerM: .2, cacheWritePerM: 0 },
+    },
+    tariffs: [book] } }
+  const tree = b.show('settings.section', { status: 'ready', data: enriched })
+  const text = b.text(tree)
+  assert.match(text, /价目表估算/)
+  assert.match(text, /DeepSeek 公开价表/)
+  assert.match(text, /自动峰谷/)
+  // The row reports the reading for RIGHT NOW, not just the binding.
+  assert.match(text, /高峰 1\.32 \/ 3\.96 USD/)
+  assert.ok(b.nodes(tree).find(n => n.type === 'option' && n.props.value === 'tariff:deepseek-public-2026'))
+})
+
+await test('a route card lists every model price at once and selects the one being edited', () => {
+  const b = boot()
+  const enriched = { ...data, settings: { ...data.settings,
+    routes: [{ route: 'gateway', label: 'Gateway', group: 'Work', models: ['deepseek-v4-flash', 'deepseek-v4-pro'], official: false, active: true, hasPreferences: true }],
+    pricing: {
+      'gateway/deepseek-v4-flash': { mode: 'reference' },
+      'gateway/deepseek-v4-pro': { mode: 'custom', currency: 'CNY', inputPerM: 2, outputPerM: 8, cacheReadPerM: .2, cacheWritePerM: 0 },
+    },
+    referenceRates: { 'deepseek-v4-flash': { inputPerM: .15, outputPerM: .6, cacheReadPerM: .003 } },
+    referenceModels: ['deepseek-v4-flash'] } }
+  const tree = b.show('settings.section', { status: 'ready', data: enriched })
+  const text = b.text(tree)
+  assert.match(text, /本账户的模型与单价/)
+  assert.match(text, /deepseek-v4-flash/)
+  assert.match(text, /deepseek-v4-pro/)
+  // A reference row summarises the snapshot, a custom row its own rates.
+  assert.match(text, /参考价快照 0\.15 \/ 0\.6 USD/)
+  assert.match(text, /¥2 \/ ¥8 CNY/)
+  assert.match(text, /新增模型价格/)
+
+  const rows = b.nodes(tree).filter(n => n.props && typeof n.props.className === 'string' && n.props.className.startsWith('api-ledger-price-row'))
+  assert.equal(rows.length, 2, 'both configured models must be listed together')
+  // Only an explicitly stored price can be deleted; a fallback row cannot.
+  assert.equal(b.nodes(tree).filter(n => n.props.className === 'api-ledger-remove').length, 2)
+
+  const edit = b.nodes(tree).filter(n => n.props.className === 'api-ledger-edit')
+  assert.equal(edit.length, 2)
+  edit[1].props.onClick()
+  const picked = b.updates.filter(u => u && Object.hasOwn(u, 'gateway'))
+  assert.equal(picked.at(-1).gateway, 'deepseek-v4-pro', 'editing a row must select THAT model, not the first one')
 })
 
 console.log(`client behavior: ${passed} passed`)

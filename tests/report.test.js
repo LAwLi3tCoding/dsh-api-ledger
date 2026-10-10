@@ -419,4 +419,30 @@ await test('official capture uses verified endpoints, persists tariff, and rejec
   } finally { Date.now = clock }
 })
 
+await test('a gateway can bind the built-in book and have calls priced peak-aware', async (dir) => {
+  const captured = await mount(dir, [], {
+    llm: { listConfigurableProviders: () => [{ provider: 'corporate-gateway', settingsNs: 'other' }] },
+    settings: { get: () => ({ baseURL: 'https://gateway.example' }) },
+  })
+  const clock = Date.now
+  Date.now = () => Date.parse('2026-09-21T02:00:00Z') // Monday, Beijing 10:00
+  try {
+    let r = await captured.rpc.handlers.report()
+    const book = r.settings.tariffs.find(entry => entry.id === 'deepseek-public-2026')
+    assert.ok(book, 'the built-in book must be offered to every route')
+    assert.equal(book.builtin, true)
+    assert.equal(book.scheduled, true)
+    assert.equal(book.current['deepseek-v4-pro'].window, 'peak')
+    // A gateway is NOT a vendor endpoint — and that no longer withholds anything.
+    assert.equal(r.settings.routes.find(row => row.route === 'corporate-gateway').official, false)
+    await captured.rpc.handlers.savePreference({ revision: r.settings.revision, route: 'corporate-gateway', label: 'Gateway', group: 'Work', model: 'deepseek-v4-pro', mode: 'tariff', tariff: 'deepseek-public-2026', window: 'auto' })
+    for await (const chunk of captured.stream({ provider: 'corporate-gateway', model: 'deepseek-v4-pro' }, () => (async function* () { yield { type: 'usage', usage: { inputTokens: 1000000 } } })())) void chunk
+    r = await captured.rpc.handlers.report()
+    assert.equal(r.recent[0].priceSource, 'tariff')
+    assert.equal(r.recent[0].priceBook, 'deepseek-public-2026')
+    assert.equal(r.recent[0].tariff, 'peak')
+    assert.equal(r.recent[0].usd, 1.32)
+  } finally { Date.now = clock }
+})
+
 console.log(`report: ${passed} passed`)

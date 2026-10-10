@@ -66,16 +66,46 @@ Replace `web` with your CLI-managed profile. DSH 0.1.5-rc.2 reserves `desktop` f
 
 ### Configure pricing
 
-Open **Settings → API Ledger → Accounts and pricing**. Select a route and model; save before switching models.
+Open **Settings → API Ledger → Accounts and pricing**. Each account (route) first lists every model it knows about with its current pricing mode, configured prices on top:
+
+- **Edit** loads that model into the form below; **Save route** stores it. The card stays on the model you saved instead of jumping back to the first one.
+- **Delete** drops that one model's ledger price, keeping the account name, its group and every other model.
+- **Add a model price** clears the form so a model that has never been called can be priced in advance.
+- An account can hold any number of models, and the same model is priced separately per account.
 
 | Mode | Behavior |
 | --- | --- |
-| Official tariff estimate | Default for recognized DeepSeek official endpoints without an explicit override. Applies the bundled USD tariff and peak/off-peak rules. |
-| Reference estimate | Explicit opt-in to a fixed DeepSeek off-peak USD snapshot. Does not adjust for time or holidays. |
+| Price-book estimate | Bind a price book (model → rates, plus an optional schedule). Peak and holidays are judged at request start in the BOOK's own time zone. |
 | Custom price estimate | Set currency and prices per million tokens: uncached input, output, cache read and cache write. Zero is valid. |
-| Usage only | Record tokens without inventing a cost. Default for other endpoints. |
+| Usage only | Record tokens without inventing a cost. The default when nothing is configured. |
 
-Official endpoint detection checks the effective URL, including the DeepSeek adapter's launch-environment override. A route's name alone never establishes official pricing. The bundled [official price snapshot](https://api-docs.deepseek.com/quick_start/pricing/) was verified on **2026-09-21**. It supports `deepseek-flash`, `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp` and `deepseek-v4-pro`. Peak selection uses request start time and the [2026 Chinese holiday calendar](https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm). Unsupported models or calendar years remain unpriced. Prices update with plugin releases, not through a live pricing API.
+**Pricing is decoupled from "is this the vendor's own endpoint".** The bundled book `deepseek-public-2026` (verified **2026-09-21**) covers `deepseek-flash`, `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp` and `deepseek-v4-pro`, and carries a schedule: weekdays 09:00–12:00 and 14:00–18:00 in `Asia/Shanghai` are peak, the listed rates are the off-peak basis, and peak doubles them. Holidays follow the [2026 State Council notice](https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm). **Any account can bind it** — including a corporate gateway that does not draw on personal DeepSeek quota; an endpoint recognized as [DeepSeek official](https://api-docs.deepseek.com/quick_start/pricing/) merely binds it by default. Binding a public book estimates at those rates; it does not claim the account is billed that way.
+
+**Schedule**: `Peak-aware` follows the windows above at request time; `Base rates only` always uses the book's listed rates (the old reference-snapshot behaviour). When a book has peak rules but no calendar for the current year, peak-aware calls stay unpriced rather than guessing a calendar.
+
+Official endpoint detection checks the effective URL, including the DeepSeek adapter's launch-environment override. A route's name alone never establishes official pricing. Prices update with plugin releases, not through a live pricing API.
+
+**Custom price books (config layer; no editor in the UI yet)** — add a `tariffs` section to `$DSH_HOME/api-ledger/config.json`:
+
+```json
+"tariffs": {
+  "acme-gateway": {
+    "label": "ACME gateway", "currency": "CNY", "timeZone": "Asia/Shanghai",
+    "verifiedAt": "2026-10-01", "source": "https://intranet.example/pricing",
+    "peak": { "days": "mon-fri", "windows": ["09:00-12:00"], "multiplier": 1.5 },
+    "holidays": { "2026": [["01-01", "01-03"]] },
+    "models": { "deepseek-v4-pro": { "inputPerM": 4, "outputPerM": 12, "cacheReadPerM": 0.4 } }
+  }
+}
+```
+
+Defaults: `currency` USD, `timeZone` `Asia/Shanghai`; no `peak` means a flat book; a built-in id is never replaced. Bind with:
+
+```json
+"pricing": { "corporate-gateway/deepseek-v4-pro": { "mode": "tariff", "tariff": "deepseek-public-2026", "window": "auto" } }
+```
+
+The legacy `{ "mode": "official" }` and `{ "mode": "reference" }` spellings keep working unchanged; saving that model in Settings rewrites them as the equivalent `tariff` binding. Rates already frozen into records are never recalculated.
 
 Names and groups affect the current report presentation. Price edits affect future calls only. Existing custom preferences survive upgrades. Reset/delete removes ledger preferences for that route, not DSH model settings or historical calls. Inactive routes are grouped separately; preference-only routes disappear when removed.
 
@@ -157,16 +187,26 @@ dsh plugin --profile web add dsh-api-ledger
 
 ### 配置计价
 
-打开「设置 → API 账本 → 账户与计价」，选择路由和模型。每个模型单独保存，切换前先保存当前修改。
+打开「设置 → API 账本 → 账户与计价」。每个账户（路由）先列出它已知的全部模型和当前计价方式，已单独配置的排在上面：
+
+- 「编辑」把该模型载入下面的表单；改完点「保存此路由」。保存后卡片停在这个模型上，不会跳回第一个。
+- 「删除」只清掉该模型在账本里的价格，保留账户名称、分组和其余模型。
+- 「新增模型价格」清空表单，直接输入模型 ID 即可给一个还没调用过的模型预先定价。
+- 一个账户可以配任意多个模型；同一个模型在不同账户分别配置。
 
 | 方式 | 含义 |
 | --- | --- |
-| 官方价表估算 | 已识别的 DeepSeek 官方直连在没有显式配置时默认使用，按内置 USD 价表及峰谷规则估算 |
-| 参考价估算 | 手动选择固定的官方非高峰 USD 快照，不判断时间和节假日 |
+| 价目表估算 | 绑定一张价目表（模型 → 单价，外加可选的时段规则），按请求开始时间在该表自己的时区里判断峰谷与节假日 |
 | 自定义单价 | 按每百万 Token 填写非缓存输入、输出、缓存读和缓存写价格及币种；允许零价格 |
-| 仅记录用量 | 不猜测费用；其他接口的默认方式 |
+| 仅记录用量 | 不猜测费用；未配置时的默认方式 |
 
-官方接口按实际 URL 识别，并考虑 DeepSeek 适配器的启动环境覆盖；名称包含 DeepSeek 不代表官方直连。内置[官方价表](https://api-docs.deepseek.com/quick_start/pricing/)核验日期为 **2026-09-21**，支持 `deepseek-flash`、`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` 和 `deepseek-v4-pro`。按请求开始时间及 [2026 年中国节假日](https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm)判断峰谷；未知模型或其他日历年份仅记录用量。价表随插件版本更新，并非实时拉取。
+**计价与「这个账户是不是官方直连」解耦。** 内置价目表 `deepseek-public-2026`（核验日期 **2026-09-21**）覆盖 `deepseek-flash`、`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp`、`deepseek-v4-pro`，并带峰谷规则：工作日（时区 `Asia/Shanghai`）09:00–12:00 与 14:00–18:00 为高峰，表中价格是非高峰基准价，高峰乘 2；节假日按 [2026 年国务院安排](https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm)算非高峰。**任何账户都可以绑定它**——包括不消耗个人 DeepSeek 额度的企业网关；被识别为 [DeepSeek 官方直连](https://api-docs.deepseek.com/quick_start/pricing/)的账户只是默认绑定它。绑定公开价目表只表示按该口径估算，不代表该账户实际按此扣费。
+
+**生效方式**：「自动峰谷」随请求时间按上表变化；「仅基准价」固定用表中基准价（等价于原来的参考价快照）。价目表有峰谷规则、但没有当前年份节假日表时，「自动峰谷」记为未定价而不是猜一个。
+
+官方直连按实际 URL 识别，并考虑 DeepSeek 适配器的启动环境覆盖；名称包含 DeepSeek 不代表官方直连。价表随插件版本更新，并非实时拉取。
+
+**自定义价目表（配置层，暂无 UI 编辑器）**：在 `$DSH_HOME/api-ledger/config.json` 加 `tariffs` 段，字段缺省时 `currency` 为 USD、`timeZone` 为 `Asia/Shanghai`，没有 `peak` 即恒定价格，写成内置同名 id 不会覆盖内置表；绑定写在 `pricing` 里：`{ "corporate-gateway/deepseek-v4-pro": { "mode": "tariff", "tariff": "deepseek-public-2026", "window": "auto" } }`。旧写法 `{ "mode": "official" }` / `{ "mode": "reference" }` 继续可用，设置页保存时自动改写成等价绑定，记录中已冻结的单价不变。
 
 名称与分组调整会更新历史报表的展示，修改单价只影响后续调用。已有自定义配置不会被升级覆盖。重置／删除账本配置保留 DSH 模型配置与历史调用。历史及停用路由单独折叠展示；只有账本配置、没有历史和当前模型配置的路由，删除后会从列表消失。
 

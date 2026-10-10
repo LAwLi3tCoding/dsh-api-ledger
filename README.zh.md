@@ -58,16 +58,46 @@ dsh plugin --profile web add dsh-api-ledger
 
 ### 配置计价
 
-打开「设置 → API 账本 → 账户与计价」，选择路由和模型。每个模型单独保存，切换前先保存当前修改。
+打开「设置 → API 账本 → 账户与计价」。每个账户（路由）先列出它已知的全部模型和当前计价方式，已单独配置的排在上面：
+
+- 「编辑」把该模型载入下面的表单；改完点「保存此路由」。保存后卡片停在这个模型上，不会跳回第一个。
+- 「删除」只清掉该模型在账本里的价格，保留账户名称、分组和其余模型。
+- 「新增模型价格」清空表单，直接输入模型 ID 即可给一个还没调用过的模型预先定价。
+- 一个账户可以配任意多个模型；同一个模型在不同账户分别配置。
 
 | 方式 | 含义 |
 | --- | --- |
-| 官方价表估算 | 已识别的 DeepSeek 官方直连在没有显式配置时默认使用，按内置 USD 价表及峰谷规则估算 |
-| 参考价估算 | 手动选择固定的官方非高峰 USD 快照，不判断时间和节假日 |
+| 价目表估算 | 绑定一张价目表（模型 → 单价，外加可选的时段规则），按请求开始时间在该表自己的时区里判断峰谷与节假日 |
 | 自定义单价 | 按每百万 Token 填写非缓存输入、输出、缓存读和缓存写价格及币种；允许零价格 |
-| 仅记录用量 | 不猜测费用；其他接口的默认方式 |
+| 仅记录用量 | 不猜测费用；未配置时的默认方式 |
 
-官方接口按实际 URL 识别，并考虑 DeepSeek 适配器的启动环境覆盖；名称包含 DeepSeek 不代表官方直连。内置[官方价表](https://api-docs.deepseek.com/quick_start/pricing/)核验日期为 **2026-09-21**，支持 `deepseek-flash`、`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` 和 `deepseek-v4-pro`。按请求开始时间及 [2026 年中国节假日](https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm)判断峰谷；未知模型或其他日历年份仅记录用量。价表随插件版本更新，并非实时拉取。
+**计价与「这个账户是不是官方直连」解耦。** 内置价目表 `deepseek-public-2026`（核验日期 **2026-09-21**）覆盖 `deepseek-flash`、`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp`、`deepseek-v4-pro`，并带峰谷规则：工作日（时区 `Asia/Shanghai`，下同）09:00–12:00 与 14:00–18:00 为高峰，表中价格是非高峰基准价，高峰乘 2；节假日按 [2026 年国务院安排](https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm)算非高峰。**任何账户都可以绑定它**——包括不消耗个人 DeepSeek 额度的企业网关；被识别为 [DeepSeek 官方直连](https://api-docs.deepseek.com/quick_start/pricing/)的账户只是默认绑定它。绑定公开价目表只表示按该口径估算，不代表该账户实际按此扣费。
+
+**生效方式**：「自动峰谷」按上表随请求时间变化；「仅基准价」固定用表中的基准价（等价于原来的参考价快照），不看时间与节假日。价目表有峰谷规则、但没有当前年份的节假日表时，「自动峰谷」会把该模型记为未定价，而不是猜一个日历。
+
+官方直连按实际 URL 识别，并考虑 DeepSeek 适配器的启动环境覆盖；名称包含 DeepSeek 不代表官方直连。价目表随插件版本更新，并非实时拉取。
+
+**自定义价目表（配置层，暂无 UI 编辑器）**：在 `$DSH_HOME/api-ledger/config.json` 里加 `tariffs` 段：
+
+```json
+"tariffs": {
+  "acme-gateway": {
+    "label": "ACME 网关", "currency": "CNY", "timeZone": "Asia/Shanghai",
+    "verifiedAt": "2026-10-01", "source": "https://intranet.example/pricing",
+    "peak": { "days": "mon-fri", "windows": ["09:00-12:00"], "multiplier": 1.5 },
+    "holidays": { "2026": [["01-01", "01-03"]] },
+    "models": { "deepseek-v4-pro": { "inputPerM": 4, "outputPerM": 12, "cacheReadPerM": 0.4 } }
+  }
+}
+```
+
+缺省值：`currency` 为 USD、`timeZone` 为 `Asia/Shanghai`；没有 `peak` 即恒定价格；写成内置同名 id 不会覆盖内置表。绑定写法：
+
+```json
+"pricing": { "corporate-gateway/deepseek-v4-pro": { "mode": "tariff", "tariff": "deepseek-public-2026", "window": "auto" } }
+```
+
+旧写法 `{ "mode": "official" }` / `{ "mode": "reference" }` 继续可用、语义不变；在设置页保存该模型时会自动改写成等价的 `tariff` 绑定。已在记录中冻结的历史单价不会因此改变。
 
 名称与分组调整会更新历史报表的展示，修改单价只影响后续调用。已有自定义配置不会被升级覆盖。重置／删除账本配置保留 DSH 模型配置与历史调用。历史及停用路由单独折叠展示；只有账本配置、没有历史和当前模型配置的路由，删除后会从列表消失。
 

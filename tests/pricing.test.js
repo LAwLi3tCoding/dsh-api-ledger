@@ -15,11 +15,15 @@ import {
   DEFAULT_POOLS,
   REPORTING_CURRENCY,
   USD_RATES,
+  BUILTIN_TARIFF_ID,
   describeRates,
+  evaluateTariff,
   normalizeOverride,
+  normalizeTariff,
   poolOf,
   priceUsage,
   ratesFor,
+  resolveTariffs,
 } from '../lib/pricing.js'
 
 let passed = 0
@@ -137,6 +141,69 @@ test('legacy currency warning recognizes only matching mislabelled rates', () =>
   assert.equal(suspectCurrency(rec), true)
   assert.equal(suspectCurrency({ ...rec, currency: 'USD' }), false)
   assert.equal(suspectCurrency({ ...rec, base: null }), false)
+})
+
+test('a route that is NOT the vendor can bind the book and get peak-aware pricing', () => {
+  // This is the whole point of the split: the gateway resells the same models,
+  // so the user may estimate it on the same published schedule.
+  const peak = Date.parse('2026-09-21T02:00:00Z')   // Monday, Beijing 10:00
+  const off = Date.parse('2026-09-21T20:00:00Z')    // Beijing Tuesday 04:00
+  const binding = { 'gateway/deepseek-v4-pro': { mode: 'tariff', tariff: BUILTIN_TARIFF_ID, window: 'auto' } }
+  const atPeak = ratesFor('gateway', 'deepseek-v4-pro', binding, { official: false, time: peak })
+  assert.equal(atPeak.source, 'tariff')
+  assert.equal(atPeak.tariff, 'peak')
+  assert.equal(atPeak.priceBook, BUILTIN_TARIFF_ID)
+  assert.equal(atPeak.rates.inputPerM, 1.32)
+  assert.equal(atPeak.rates.outputPerM, 3.96)
+  assert.equal(ratesFor('gateway', 'deepseek-v4-pro', binding, { official: false, time: off }).rates.inputPerM, .66)
+  // `base` is how a fixed snapshot is expressed now, and it needs no calendar.
+  const flat = { 'gateway/deepseek-v4-pro': { mode: 'tariff', tariff: BUILTIN_TARIFF_ID, window: 'base' } }
+  assert.equal(ratesFor('gateway', 'deepseek-v4-pro', flat, { official: false, time: peak }).rates.inputPerM, .66)
+  // Binding stays explicit: recognition is a default, never a requirement.
+  assert.equal(ratesFor('gateway', 'deepseek-v4-pro', {}, { official: false, time: peak }), null)
+  // An unknown book is not a reason to fall back to anything.
+  assert.equal(ratesFor('gateway', 'deepseek-v4-pro', { 'gateway/deepseek-v4-pro': { mode: 'tariff', tariff: 'nope' } }, { official: false, time: peak }), null)
+})
+
+test('the whole schedule is judged in the book time zone, never in UTC', () => {
+  // UTC Sunday 20:00 is Beijing Monday 04:00: outside every window.
+  assert.equal(officialRates('deepseek-flash', Date.parse('2026-09-20T20:00:00Z')).tariff, 'off-peak')
+  // UTC Sunday 01:00 is Beijing Sunday 09:00: inside a window, but a weekend.
+  assert.equal(officialRates('deepseek-flash', Date.parse('2026-09-20T01:00:00Z')).tariff, 'off-peak')
+  // UTC Monday 01:00 is Beijing Monday 09:00: the window opens.
+  assert.equal(officialRates('deepseek-flash', Date.parse('2026-09-21T01:00:00Z')).tariff, 'peak')
+  assert.equal(officialRates('deepseek-flash', Date.parse('2026-09-21T00:59:59Z')).tariff, 'off-peak')
+})
+
+test('a book with peak rules but no calendar for that year stays unpriced', () => {
+  const book = normalizeTariff('acme', {
+    currency: 'CNY',
+    peak: { days: 'mon-fri', windows: ['09:00-12:00'], multiplier: 3 },
+    models: { 'deepseek-v4-pro': { inputPerM: 1, outputPerM: 2 } },
+  })
+  assert.notEqual(book, null)
+  assert.equal(evaluateTariff(book, 'deepseek-v4-pro', Date.parse('2026-09-21T02:00:00Z'), 'auto'), null)
+  assert.equal(evaluateTariff(book, 'deepseek-v4-pro', Date.parse('2026-09-21T02:00:00Z'), 'base').rates.inputPerM, 1)
+})
+
+test('user books are validated row by row and never shadow a built-in', () => {
+  const books = resolveTariffs({
+    acme: {
+      label: 'ACME gateway', currency: 'CNY',
+      peak: { days: 'mon-fri', windows: ['09:00-12:00'], multiplier: 3 },
+      holidays: { 2026: [['09-25', '09-27']] },
+      models: { 'deepseek-v4-pro': { inputPerM: 1, outputPerM: 2 }, broken: { inputPerM: 'x' }, 'constructor': 5 },
+    },
+    [BUILTIN_TARIFF_ID]: { models: { 'deepseek-v4-pro': { inputPerM: 999, outputPerM: 999 } } },
+    empty: { models: {} },
+  })
+  assert.deepEqual(Object.keys(books).sort(), [BUILTIN_TARIFF_ID, 'acme'].sort())
+  assert.deepEqual(Object.keys(books.acme.models), ['deepseek-v4-pro'])
+  assert.equal(books.acme.currency, 'CNY')
+  assert.equal(books[BUILTIN_TARIFF_ID].models['deepseek-v4-pro'].inputPerM, .66)
+  // Holiday and peak are read in the book's own zone with its own multiplier.
+  assert.equal(evaluateTariff(books.acme, 'deepseek-v4-pro', Date.parse('2026-09-24T02:00:00Z'), 'auto').rates.inputPerM, 3)
+  assert.equal(evaluateTariff(books.acme, 'deepseek-v4-pro', Date.parse('2026-09-25T02:00:00Z'), 'auto').window, 'base')
 })
 
 console.log(`pricing.js: ${passed} passed`)
